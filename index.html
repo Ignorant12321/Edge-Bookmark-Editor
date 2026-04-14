@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title id="pageTitle" data-i18n="page.title">Edge收藏夹编辑器</title>
+<link rel="stylesheet" href="./assets/css/style.css" />
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <div class="brand">
+      <div class="logo">🌐</div>
+      <div class="brand-title-with-tip">
+        <span data-i18n="brand.title">Edge收藏夹编辑器</span>
+        <span class="help-tip help-tip-topbar" tabindex="0" data-i18n-aria-label="tooltip.app.aria">
+          ⓘ
+          <span class="help-pop" role="tooltip">
+            <span class="help-pop-title" data-i18n="tooltip.app.title">应用说明</span>
+            <ul class="help-pop-list" data-i18n-list="tooltip.app.items"></ul>
+          </span>
+        </span>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="filter-bar">
+        <div class="search-wrap">
+          <input class="search-input" id="searchInput" data-i18n-placeholder="search.placeholder" placeholder="搜索文件夹名、网站名、网址..." />
+          <button class="clear-btn" id="btnClearSearch" data-i18n-title="search.clear" title="清空">×</button>
+        </div>
+        <select class="select" id="searchScope">
+          <option value="all" data-i18n="scope.all">全部收藏</option>
+          <option value="subtree" data-i18n="scope.subtree">当前及子文件夹</option>
+          <option value="current" data-i18n="scope.current">当前文件夹</option>
+        </select>
+        <select class="select" id="typeFilter">
+          <option value="all" data-i18n="type.all">全部类型</option>
+          <option value="folder" data-i18n="type.folder">仅文件夹</option>
+          <option value="bookmark" data-i18n="type.bookmark">仅网址</option>
+        </select>
+      </div>
+      <div class="menu-bar">
+        <div class="menu-wrap" id="importMenuWrap">
+          <button class="btn" id="importMenuBtn" data-i18n="menu.import">导入 ▾</button>
+          <div class="menu-pop">
+            <button id="actionImportHtml" data-i18n="menu.html">HTML</button>
+            <button id="actionImportJson" data-i18n="menu.json">JSON</button>
+            <button id="actionLoadSample" data-i18n="menu.preloaded">预置</button>
+          </div>
+        </div>
+        <div class="menu-wrap" id="exportMenuWrap">
+          <button class="btn primary" id="exportMenuBtn" data-i18n="menu.export">导出 ▾</button>
+          <div class="menu-pop">
+            <button id="actionExportHtml" data-i18n="menu.html">HTML</button>
+            <button id="actionExportJson" data-i18n="menu.json">JSON</button>
+          </div>
+        </div>
+      </div>
+      <button class="btn" id="btnResetFilters" data-i18n="btn.reset" data-i18n-title="btn.reset" data-i18n-aria-label="btn.reset" title="重置" aria-label="重置">重置</button>
+      <button class="btn" id="btnFetchMissingIcons" data-i18n="btn.fetchMissingIcons" data-i18n-title="btn.fetchMissingIconsTitle" title="一键获取缺失ICON">获取ICON</button>
+      <button class="lang-icon-btn" id="langToggleBtn" data-i18n-title="btn.langToggleTitle" data-i18n-aria-label="btn.langToggleAria" title="切换语言" aria-label="切换语言">
+        <span class="lang-glyph" aria-hidden="true">中文</span>
+      </button>
+      <button class="theme-switch-btn" id="themeToggleBtn" data-i18n-title="btn.themeToggleTitle" data-i18n-aria-label="btn.themeToggleAria" title="切换主题" aria-label="切换主题" aria-pressed="false">
+        <span class="theme-switch-track" aria-hidden="true">
+          <span class="theme-switch-thumb">
+            <span class="theme-sun">☀</span>
+            <span class="theme-moon">☾</span>
+          </span>
+        </span>
+      </button>
+    </div>
+  </div>
+
+  <div class="workspace">
+    <section class="panel">
+      <div class="panel-header">
+        <div class="panel-title panel-title-with-tip">
+          <span data-i18n="panel.tree">目录</span>
+          <span class="help-tip" tabindex="0" data-i18n-aria-label="tooltip.tree.aria">
+            ⓘ
+            <span class="help-pop" role="tooltip">
+              <span class="help-pop-title" data-i18n="tooltip.tree.title">目录区</span>
+              <ul class="help-pop-list" data-i18n-list="tooltip.tree.items"></ul>
+            </span>
+          </span>
+        </div>
+        <div class="panel-subtools"><div class="tag" id="stats"></div></div>
+      </div>
+      <div class="panel-body tree-body">
+        <div class="tree-scroll-outer"><div class="tree-scroll"><div class="tree" id="tree"></div></div></div>
+      </div>
+    </section>
+
+    <div class="splitter" id="splitterLeft"></div>
+
+    <section class="panel">
+      <div class="panel-header">
+        <div class="panel-title panel-title-with-tip">
+          <span id="listTitle" data-i18n="panel.content">内容</span>
+          <span class="help-tip" tabindex="0" data-i18n-aria-label="tooltip.content.aria">
+            ⓘ
+            <span class="help-pop" role="tooltip">
+              <span class="help-pop-title" data-i18n="tooltip.content.title">内容区</span>
+              <ul class="help-pop-list" data-i18n-list="tooltip.content.items"></ul>
+            </span>
+          </span>
+        </div>
+        <div class="panel-subtools">
+          <div class="tag" id="listStats"></div>
+          <button class="btn" id="btnAddFolderCenter" data-i18n="btn.addFolder">新建文件夹</button>
+          <button class="btn" id="btnAddBookmark" data-i18n="btn.addBookmark">添加网址</button>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div class="breadcrumbs" id="breadcrumbs"></div>
+        <div class="list" id="list"></div>
+      </div>
+    </section>
+
+    <div class="splitter" id="splitterRight"></div>
+
+    <section class="panel">
+      <div class="panel-header">
+        <div class="panel-title panel-title-with-tip">
+          <span data-i18n="panel.editor">编辑器</span>
+          <span class="help-tip" tabindex="0" data-i18n-aria-label="tooltip.editor.aria">
+            ⓘ
+            <span class="help-pop" role="tooltip">
+              <span class="help-pop-title" data-i18n="tooltip.editor.title">编辑区</span>
+              <ul class="help-pop-list" data-i18n-list="tooltip.editor.items"></ul>
+            </span>
+          </span>
+        </div>
+        <div class="tag" id="editorType" data-i18n="editor.type.none">未选择</div>
+      </div>
+      <div class="panel-body">
+        <div id="editorEmpty" class="empty" data-i18n="editor.empty">从目录区或内容区选中一个文件夹 / 网址后，即可在这里编辑。</div>
+        <div id="editorForm" class="hidden">
+          <div class="field">
+            <label class="label-with-tip">
+              <span data-i18n="editor.label.name">名称</span>
+              <span class="help-tip help-tip-sm" tabindex="0" data-i18n-aria-label="tooltip.name.aria">
+                ⓘ
+                <span class="help-pop" role="tooltip">
+                  <span class="help-pop-title" data-i18n="tooltip.name.title">名称</span>
+                  <ul class="help-pop-list" data-i18n-list="tooltip.name.items"></ul>
+                </span>
+              </span>
+            </label>
+            <input class="input" id="editTitle" />
+          </div>
+          <div class="field" id="fieldUrl">
+            <label class="label-with-tip">
+              <span data-i18n="editor.label.url">网址</span>
+              <span class="help-tip help-tip-sm" tabindex="0" data-i18n-aria-label="tooltip.url.aria">
+                ⓘ
+                <span class="help-pop" role="tooltip">
+                  <span class="help-pop-title" data-i18n="tooltip.url.title">网址</span>
+                  <ul class="help-pop-list" data-i18n-list="tooltip.url.items"></ul>
+                </span>
+              </span>
+            </label>
+            <input class="input" id="editHref" />
+          </div>
+          <div class="field hidden" id="fieldIcon">
+            <label class="label-with-tip">
+              <span data-i18n="editor.label.icon">ICON</span>
+              <span class="help-tip help-tip-sm" tabindex="0" data-i18n-aria-label="tooltip.icon.aria">
+                ⓘ
+                <span class="help-pop" role="tooltip">
+                  <span class="help-pop-title" data-i18n="tooltip.icon.title">ICON</span>
+                  <ul class="help-pop-list" data-i18n-list="tooltip.icon.items"></ul>
+                </span>
+              </span>
+            </label>
+            <div class="icon-input-wrap">
+              <img id="iconPreview" class="icon-inline-preview hidden" data-i18n-alt="editor.iconPreviewAlt" alt="ICON预览" />
+              <input class="input icon-input" id="editIcon" data-i18n-placeholder="editor.iconPlaceholder" placeholder="支持 data:image... / http(s)链接 / 原始Base64" />
+            </div>
+            <div class="panel-subtools">
+              <button class="btn" id="btnFetchIcon" data-i18n="editor.btn.fetchIcon">网络获取</button>
+              <button class="btn" id="btnPickIconFile" data-i18n="editor.btn.uploadIcon">本地上传</button>
+            </div>
+          </div>
+          <div class="field">
+            <label class="label-with-tip">
+              <span data-i18n="editor.label.actions">操作</span>
+              <span class="help-tip help-tip-sm" tabindex="0" data-i18n-aria-label="tooltip.actions.aria">
+                ⓘ
+                <span class="help-pop" role="tooltip">
+                  <span class="help-pop-title" data-i18n="tooltip.actions.title">操作</span>
+                  <ul class="help-pop-list" data-i18n-list="tooltip.actions.items"></ul>
+                </span>
+              </span>
+            </label>
+            <div class="panel-subtools">
+              <button class="btn" id="btnMove" data-i18n="editor.btn.move">移动到文件夹</button>
+              <button class="btn danger" id="btnDelete" data-i18n="editor.btn.delete">删除</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div class="modal-mask" id="moveModalMask">
+  <div class="modal">
+    <div class="modal-header">
+      <div style="font-weight:700;" data-i18n="moveModal.title">移动到文件夹</div>
+      <button class="btn" id="btnCloseMoveModal" data-i18n="moveModal.close">关闭</button>
+    </div>
+    <div class="modal-body">
+      <div class="helper" style="margin-bottom:10px;" data-i18n="moveModal.helper">请选择目标文件夹，然后点击底部确认移动。</div>
+      <div class="tree-scroll"><div class="tree" id="moveTree"></div></div>
+      <div class="panel-subtools" style="margin-top:14px; justify-content:flex-end;">
+        <button class="btn" id="btnCancelMove" data-i18n="moveModal.cancel">取消</button>
+        <button class="btn primary" id="btnConfirmMove" data-i18n="moveModal.confirm">确认移动</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="fileHtml" accept=".html,text/html" class="hidden" />
+<input type="file" id="fileJson" accept=".json,application/json" class="hidden" />
+<input type="file" id="fileIcon" accept="image/*,.ico,.svg" class="hidden" />
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+<script type="module" src="./assets/js/main.js"></script>
+</body>
+</html>
