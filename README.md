@@ -1,8 +1,8 @@
-# bookmark_editor
+# Edge-Bookmark-Editor
 
 一个纯静态的 Edge 收藏夹编辑器。
 
-可直接在浏览器里打开，用来导入、整理、编辑并重新导出 Edge 的收藏夹 HTML。
+可直接在浏览器里打开，用来导入、整理、编辑并重新导出 Edge 的收藏夹 HTML。【支持中英文、深浅色模式、导入导出功能】
 
 ![浅色模式](README.assets/浅色模式.png)
 
@@ -20,9 +20,16 @@
 
 ## 部署方式
 
-- 下载源码到本地，vscode开启http服务
-  ![image-20260414170959695](README.assets/image-20260414170959695.png)
-- 可以直接放到 Cloudflare Pages、GitHub Pages 等静态托管服务。
+### 方法一
+
+下载源码到本地，vscode开启http服务
+![image-20260414170959695](README.assets/image-20260414170959695.png)
+
+### 方法二
+
+可以直接放到 Cloudflare Pages、GitHub Pages 等静态托管服务。
+示例网址：[edge-bookmark-editor.pages.dev](https://edge-bookmark-editor.pages.dev/)
+![image-20260414173800883](README.assets/image-20260414173800883.png)
 
 ## 导入/导出收藏夹
 
