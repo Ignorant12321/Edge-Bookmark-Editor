@@ -15,6 +15,7 @@ export const state = {
   draggingId: null,
   iconFetchMode: "auto",
   iconUploadSize: 32,
+  lastAction: null,
   historyPast: [],
   historyFuture: [],
 };

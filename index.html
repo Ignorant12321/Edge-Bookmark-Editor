@@ -54,46 +54,41 @@
         </div>
       </div>
       <div class="toolbar-actions">
-        <div class="nav-group" id="navGroup">
-          <button class="btn icon-nav-btn" id="btnUndo" data-i18n-title="btn.undo" data-i18n-aria-label="btn.undo" title="撤销" aria-label="撤销">
-            <span aria-hidden="true">↶</span>
-          </button>
-          <button class="btn icon-nav-btn" id="btnRedo" data-i18n-title="btn.redo" data-i18n-aria-label="btn.redo" title="重做" aria-label="重做">
-            <span aria-hidden="true">↷</span>
-          </button>
-          <button class="btn icon-nav-btn" id="btnResetFilters" data-i18n-title="btn.reset" data-i18n-aria-label="btn.reset" title="重置" aria-label="重置">
-            <span aria-hidden="true">⟳</span>
-          </button>
+        <div class="toolbar-group toolbar-group-fetch">
+          <button class="btn toolbar-main-btn toolbar-fetch-btn" id="btnFetchMissingIcons" data-i18n="btn.fetchMissingIcons" data-i18n-title="btn.fetchMissingIconsTitle" title="一键获取缺失ICON">获取ICON</button>
         </div>
-        <button class="btn toolbar-main-btn toolbar-fetch-btn" id="btnFetchMissingIcons" data-i18n="btn.fetchMissingIcons" data-i18n-title="btn.fetchMissingIconsTitle" title="一键获取缺失ICON">获取ICON</button>
-        <div class="menu-bar">
-          <div class="menu-wrap" id="importMenuWrap">
-            <button class="btn toolbar-main-btn" id="importMenuBtn" data-i18n="menu.import">导入 ▾</button>
-            <div class="menu-pop">
-              <button id="actionImportHtml" data-i18n="menu.html">HTML</button>
-              <button id="actionImportJson" data-i18n="menu.json">JSON</button>
-              <button id="actionLoadSample" data-i18n="menu.preloaded">预置</button>
+        <div class="toolbar-group toolbar-group-io">
+          <div class="menu-bar">
+            <div class="menu-wrap" id="importMenuWrap">
+              <button class="btn toolbar-main-btn" id="importMenuBtn" data-i18n="menu.import">导入 ▾</button>
+              <div class="menu-pop">
+                <button id="actionImportHtml" data-i18n="menu.html">HTML</button>
+                <button id="actionImportJson" data-i18n="menu.json">JSON</button>
+                <button id="actionLoadSample" data-i18n="menu.preloaded">预置</button>
+              </div>
             </div>
-          </div>
-          <div class="menu-wrap" id="exportMenuWrap">
-            <button class="btn primary toolbar-main-btn" id="exportMenuBtn" data-i18n="menu.export">导出 ▾</button>
-            <div class="menu-pop">
-              <button id="actionExportHtml" data-i18n="menu.html">HTML</button>
-              <button id="actionExportJson" data-i18n="menu.json">JSON</button>
+            <div class="menu-wrap" id="exportMenuWrap">
+              <button class="btn primary toolbar-main-btn" id="exportMenuBtn" data-i18n="menu.export">导出 ▾</button>
+              <div class="menu-pop">
+                <button id="actionExportHtml" data-i18n="menu.html">HTML</button>
+                <button id="actionExportJson" data-i18n="menu.json">JSON</button>
+              </div>
             </div>
           </div>
         </div>
-        <button class="lang-icon-btn" id="langToggleBtn" data-i18n-title="btn.langToggleTitle" data-i18n-aria-label="btn.langToggleAria" title="切换语言" aria-label="切换语言">
-          <span class="lang-glyph" aria-hidden="true">中文</span>
-        </button>
-        <button class="theme-switch-btn" id="themeToggleBtn" data-i18n-title="btn.themeToggleTitle" data-i18n-aria-label="btn.themeToggleAria" title="切换主题" aria-label="切换主题" aria-pressed="false">
-          <span class="theme-switch-track" aria-hidden="true">
-            <span class="theme-switch-thumb">
-              <span class="theme-sun">☀</span>
-              <span class="theme-moon">☾</span>
+        <div class="toolbar-group toolbar-group-appearance">
+          <button class="lang-icon-btn" id="langToggleBtn" data-i18n-title="btn.langToggleTitle" data-i18n-aria-label="btn.langToggleAria" title="切换语言" aria-label="切换语言">
+            <span class="lang-glyph" aria-hidden="true">中文</span>
+          </button>
+          <button class="theme-switch-btn" id="themeToggleBtn" data-i18n-title="btn.themeToggleTitle" data-i18n-aria-label="btn.themeToggleAria" title="切换主题" aria-label="切换主题" aria-pressed="false">
+            <span class="theme-switch-track" aria-hidden="true">
+              <span class="theme-switch-thumb">
+                <span class="theme-sun">☀</span>
+                <span class="theme-moon">☾</span>
+              </span>
             </span>
-          </span>
-        </button>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -219,7 +214,7 @@
                   <div class="menu-pop icon-fetch-menu-pop">
                     <button data-icon-mode="auto" data-i18n="editor.fetchMode.auto">自动（推荐）</button>
                     <button data-icon-mode="duckduckgo" data-i18n="editor.fetchMode.duckduckgo">DuckDuckGo</button>
-                    <button data-icon-mode="favicon" data-i18n="editor.fetchMode.favicon">Favicon.con</button>
+                    <button data-icon-mode="favicon" data-i18n="editor.fetchMode.favicon">Favicon.ico</button>
                     <button data-icon-mode="googles2" data-i18n="editor.fetchMode.googles2">Google S2</button>
                   </div>
                 </div>
@@ -273,6 +268,23 @@
               <button class="btn danger" id="btnDelete" data-i18n="editor.btn.delete">删除</button>
             </div>
           </div>
+        </div>
+      </div>
+      <div class="editor-bottom-tools">
+        <div class="editor-bottom-info">
+          <div class="editor-bottom-title" data-i18n="editor.bottomActions.title">历史操作</div>
+          <div class="editor-bottom-last is-empty" id="historyLastAction" data-i18n="editor.bottomActions.empty">暂无操作记录</div>
+        </div>
+        <div class="nav-group editor-nav-group" id="navGroup">
+          <button class="btn icon-nav-btn" id="btnUndo" data-i18n-title="btn.undo" data-i18n-aria-label="btn.undo" title="撤销" aria-label="撤销">
+            <span aria-hidden="true">↶</span>
+          </button>
+          <button class="btn icon-nav-btn" id="btnRedo" data-i18n-title="btn.redo" data-i18n-aria-label="btn.redo" title="重做" aria-label="重做">
+            <span aria-hidden="true">↷</span>
+          </button>
+          <button class="btn icon-nav-btn" id="btnResetFilters" data-i18n-title="btn.reset" data-i18n-aria-label="btn.reset" title="重置" aria-label="重置">
+            <span aria-hidden="true">⟳</span>
+          </button>
         </div>
       </div>
     </section>

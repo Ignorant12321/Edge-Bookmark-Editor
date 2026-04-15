@@ -54,6 +54,17 @@ function showToast(runtime, text="", options={}){
   }
 }
 
+function setLastAction(runtime, key, vars={}){
+  state.lastAction = { key, vars };
+}
+
+function getNodeActionTitle(node){
+  if (!node) return "";
+  if (node.type === "folder") return node.title || t("defaults.untitledFolder");
+  if (node.type === "bookmark") return node.title || t("defaults.untitledBookmark");
+  return node.title || "";
+}
+
 function buildIconCandidates(href, mode="auto"){
   try {
     const url = new URL(String(href || "").trim());
@@ -212,6 +223,10 @@ export async function loadIconFileToEditor(runtime, file, sizeOverride){
     }
     runtime.dom.editIcon.value = dataUrl;
     updateIconPreview(runtime, dataUrl);
+    const selected = findById(state.selectedItemId)?.node;
+    if (selected?.type === "bookmark"){
+      setLastAction(runtime, "history.uploadIcon", { title: getNodeActionTitle(selected), size });
+    }
   } catch (err){
     alert(err instanceof Error ? err.message : t("alerts.readImageFailed"));
   }
@@ -346,6 +361,7 @@ export async function fetchIconForSelectedBookmark(runtime, modeOverride){
     pushHistorySnapshot(snapshot);
     runtime.dom.editIcon.value = info.node.icon || "";
     updateIconPreview(runtime, info.node.icon || "");
+    setLastAction(runtime, "history.fetchIcon", { title: getNodeActionTitle(info.node) });
     showToast(runtime, t("toasts.fetchCurrentSuccess"));
   } else {
     showToast(runtime, t("toasts.fetchCurrentFailed"));
@@ -393,6 +409,7 @@ export async function fetchIconsForAllMissing(runtime){
   if (success > 0) pushHistorySnapshot(snapshot);
 
   showToast(runtime, t("toasts.batchDone", { success, failed }));
+  setLastAction(runtime, "history.fetchMissingIcons", { success, failed });
   runtime.render();
 }
 
@@ -453,6 +470,20 @@ function applyEditorValues(runtime){
     item.icon = normalizeIconInput(runtime, dom.editIcon.value);
   }
 
+  const newTitle = item.title || "";
+  const newHref = item.href || "";
+  if (oldSnapshot.title !== newTitle){
+    setLastAction(runtime, "history.rename", {
+      from: oldSnapshot.title || (item.type === "folder" ? t("defaults.untitledFolder") : t("defaults.untitledBookmark")),
+      to: newTitle,
+    });
+  } else if (item.type === "bookmark" && oldSnapshot.href !== newHref){
+    setLastAction(runtime, "history.updateUrl", {
+      title: getNodeActionTitle(item),
+      url: newHref,
+    });
+  }
+
   const hasContentChange = oldSnapshot.title !== (item.title || "")
     || (item.type === "bookmark" && (oldSnapshot.href !== (item.href || "") || oldSnapshot.icon !== (item.icon || "")));
   if (hasContentChange) touchLastModified(item);
@@ -470,35 +501,49 @@ export function autosaveEditor(runtime){
   queueEditorHistorySnapshot(snapshot);
   runtime.renderTree();
   runtime.renderList();
+  runtime.renderLastAction?.();
 }
 
 export function moveItemToFolderWithState(runtime, itemId, targetFolderId, targetIndex=null, options={}){
   const { render=true } = options;
   const owner = findParentOf(itemId);
   if (!owner) return false;
+  const itemTitle = getNodeActionTitle(findById(itemId)?.node);
+  const targetTitle = getNodeActionTitle(findById(targetFolderId)?.node);
   recordMutationBeforeChange();
   keepCurrentFolderWhenMovingAcrossParents(itemId, targetFolderId);
   moveItemToFolder(itemId, targetFolderId, targetIndex);
+  setLastAction(runtime, "history.moveTo", { title: itemTitle, target: targetTitle });
   if (render) runtime.render();
   return true;
 }
 
 export function moveItemRelativeWithState(runtime, itemId, targetId, place, options={}){
-  const { render=true } = options;
+  const { render=true, trackAction=true } = options;
   const owner = findParentOf(itemId);
   const targetOwner = findParentOf(targetId);
   if (!owner || !targetOwner) return false;
+  const itemTitle = getNodeActionTitle(findById(itemId)?.node);
+  const targetTitle = getNodeActionTitle(findById(targetId)?.node);
   recordMutationBeforeChange();
   keepCurrentFolderWhenMovingAcrossParents(itemId, targetOwner.id);
   moveItemRelativeToTarget(itemId, targetId, place);
+  if (trackAction){
+    const key = place === "before" ? "history.reorderBefore" : "history.reorderAfter";
+    setLastAction(runtime, key, { title: itemTitle, target: targetTitle });
+  }
   if (render) runtime.render();
   return true;
 }
 
 export function reorderItemWithState(runtime, folderId, itemId, targetIndex, options={}){
-  const { render=true } = options;
+  const { render=true, trackAction=true } = options;
+  const itemTitle = getNodeActionTitle(findById(itemId)?.node);
   recordMutationBeforeChange();
   reorderWithinFolder(folderId, itemId, targetIndex);
+  if (trackAction){
+    setLastAction(runtime, "history.reorder", { title: itemTitle });
+  }
   if (render) runtime.render();
 }
 
@@ -508,12 +553,14 @@ export function moveSelectedByOffset(runtime, offset){
   if (!owner) return;
   const index = owner.children.findIndex(x => x.id === itemId);
   if (index === -1) return;
+  const itemTitle = getNodeActionTitle(owner.children[index]);
   const nextIndex = Math.max(0, Math.min(owner.children.length - 1, index + offset));
   if (nextIndex === index) return;
   // reorderWithinFolder expects insertion index based on the original array,
   // so moving downward needs +1 to land at the expected final position.
   const insertionIndex = nextIndex > index ? nextIndex + 1 : nextIndex;
-  reorderItemWithState(runtime, owner.id, itemId, insertionIndex);
+  reorderItemWithState(runtime, owner.id, itemId, insertionIndex, { trackAction:false });
+  setLastAction(runtime, offset > 0 ? "history.moveDown" : "history.moveUp", { title: itemTitle });
 }
 
 export function deleteSelected(runtime){
@@ -531,6 +578,7 @@ export function deleteSelected(runtime){
   }
   if (!findById(state.selectedFolderId)) state.selectedFolderId = owner.id;
   state.selectedItemId = findById(state.selectedFolderId)?.node ? state.selectedFolderId : owner.id;
+  setLastAction(runtime, "history.delete", { title: getNodeActionTitle(item) });
   runtime.render();
 }
 
@@ -579,6 +627,7 @@ export function dissolveSelected(runtime){
     if (state.breadcrumbFolderId === folder.id) state.breadcrumbFolderId = owner.id;
   }
   state.selectedItemId = targetFolder.id;
+  setLastAction(runtime, "history.dissolve", { title: getNodeActionTitle(folder), target: getNodeActionTitle(targetFolder) });
   runtime.render();
 }
 
@@ -606,6 +655,7 @@ export function copySelected(runtime){
   touchLastModified(owner);
   if (cloned.type === "folder") state.expanded.add(cloned.id);
   state.selectedItemId = cloned.id;
+  setLastAction(runtime, "history.copy", { title: getNodeActionTitle(info.node) });
   runtime.render();
   focusEditorTitleInput(runtime);
 }
@@ -618,6 +668,7 @@ export function addFolder(runtime){
   touchLastModified(folder);
   state.expanded.add(folder.id);
   state.selectedItemId = node.id;
+  setLastAction(runtime, "history.addFolder", { title: getNodeActionTitle(node) });
   runtime.render();
   focusEditorTitleInput(runtime);
 }
@@ -630,6 +681,7 @@ export function addBookmark(runtime){
   touchLastModified(folder);
   state.expanded.add(folder.id);
   state.selectedItemId = node.id;
+  setLastAction(runtime, "history.addBookmark", { title: getNodeActionTitle(node) });
   runtime.render();
   focusEditorTitleInput(runtime);
 }
@@ -685,6 +737,7 @@ export function undo(runtime){
     if (state.historyFuture.length > HISTORY_LIMIT) state.historyFuture.shift();
   }
   restoreSnapshot(snapshot);
+  setLastAction(runtime, "history.undo");
   runtime.render();
 }
 
@@ -698,6 +751,7 @@ export function redo(runtime){
     if (state.historyPast.length > HISTORY_LIMIT) state.historyPast.shift();
   }
   restoreSnapshot(snapshot);
+  setLastAction(runtime, "history.redo");
   runtime.render();
 }
 
@@ -708,6 +762,7 @@ export function setRoot(runtime, root, options={}){
   state.breadcrumbFolderId = root.id;
   state.selectedItemId = root.id;
   state.expanded = new Set([root.id]);
+  state.lastAction = null;
   clearHistoryStacks();
   syncNextIdFromRoot();
   showToast(runtime, "");
@@ -716,12 +771,16 @@ export function setRoot(runtime, root, options={}){
 
 export function loadPreloaded(runtime){
   setRoot(runtime, parseBookmarkHtml(decodeBase64Utf8(PRELOADED_BOOKMARK_HTML_BASE64)), {rememberOriginal:true});
+  setLastAction(runtime, "history.loadSample");
+  runtime.render();
 }
 
 export function restoreOriginalData(runtime){
   if (!state.originalRoot) return;
   const restored = reseedIds(cloneDeep(state.originalRoot));
   setRoot(runtime, restored, {rememberOriginal:false});
+  setLastAction(runtime, "history.restoreOriginal");
+  runtime.render();
 }
 
 export function applyTheme(runtime, theme){
@@ -741,10 +800,14 @@ export function initTheme(runtime){
 
 export function importHtmlText(runtime, text){
   setRoot(runtime, parseBookmarkHtml(text));
+  setLastAction(runtime, "history.importHtml");
+  runtime.render();
 }
 
 export function importJsonText(runtime, text){
   setRoot(runtime, importJson(text), {rememberOriginal:true});
+  setLastAction(runtime, "history.importJson");
+  runtime.render();
 }
 
 export function createActions(runtime){

@@ -84,6 +84,7 @@ function collectDom(){
     editorEmpty: document.getElementById("editorEmpty"),
     editorForm: document.getElementById("editorForm"),
     editorType: document.getElementById("editorType"),
+    historyLastAction: document.getElementById("historyLastAction"),
     fieldUrl: document.getElementById("fieldUrl"),
     fieldIcon: document.getElementById("fieldIcon"),
     editTitle: document.getElementById("editTitle"),
@@ -116,6 +117,20 @@ function syncIconFetchModeMenu(runtime){
   runtime.dom.iconFetchModeItems?.forEach(btn => {
     btn.classList.toggle("active", btn.dataset.iconMode === mode);
   });
+}
+
+function renderLastAction(runtime){
+  const el = runtime.dom.historyLastAction;
+  if (!el) return;
+  const last = state.lastAction;
+  if (!last?.key){
+    el.textContent = String(t("editor.bottomActions.empty"));
+    el.classList.add("is-empty");
+    return;
+  }
+  const actionText = String(t(last.key, last.vars || {}));
+  el.textContent = String(t("editor.bottomActions.last", { action: actionText }));
+  el.classList.remove("is-empty");
 }
 
 function normalizeIconFetchMode(rawMode){
@@ -199,6 +214,7 @@ export function bootstrapApp(){
   runtime.renderStats = () => renderStats(runtime);
   runtime.renderList = () => renderList(runtime);
   runtime.renderEditor = () => renderEditor(runtime);
+  runtime.renderLastAction = () => renderLastAction(runtime);
   runtime.render = () => {
     runtime.renderStats();
     runtime.renderTree();
@@ -206,6 +222,7 @@ export function bootstrapApp(){
     runtime.renderEditor();
     syncIconFetchModeMenu(runtime);
     syncIconUploadSizeMenu(runtime);
+    runtime.renderLastAction();
     dom.btnClearSearch.classList.toggle("show", !!state.search);
     if (dom.btnUndo) dom.btnUndo.disabled = state.historyPast.length === 0;
     if (dom.btnRedo) dom.btnRedo.disabled = state.historyFuture.length === 0;
@@ -335,6 +352,7 @@ export function bootstrapApp(){
     if (!file) return;
     await actions.loadIconFileToEditor(file, normalizeIconUploadSize(state.iconUploadSize));
     actions.autosaveEditor();
+    runtime.render();
     e.target.value = "";
   });
   dom.editIcon.addEventListener("input", () => {
