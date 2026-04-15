@@ -5,8 +5,6 @@ import {
   findById,
   walk,
   canMoveToTarget,
-  moveItemToFolder,
-  moveItemRelativeToTarget,
 } from "./tree-model.js";
 
 export function clearTreeDragMarkers(scope=document){
@@ -28,6 +26,7 @@ function buildTree(runtime, container, opts={}){
     const row = document.createElement("div");
     row.className = "tree-row" + (node.id === activeId ? " active" : "") + (node.type === "bookmark" ? " tree-bookmark" : "");
     row.style.setProperty("--depth", depth);
+    row.dataset.nodeId = node.id;
 
     const indent = document.createElement("span");
     indent.className = "tree-indent";
@@ -51,7 +50,7 @@ function buildTree(runtime, container, opts={}){
     label.className = "tree-label";
     const bookmarkIconHtml = node.icon
       ? `<img class="tree-favicon" src="${escapeHtml(node.icon)}" alt="" />`
-      : `<span class="tree-icon">🔗</span>`;
+      : `<span class="tree-icon">🌐</span>`;
     const title = node.type === "folder"
       ? `<span class="tree-icon">📁</span><span class="tree-title">${escapeHtml(node.title)}</span><span class="tree-count">${countDirectBookmarkCount(node)}</span>`
       : `${bookmarkIconHtml}<span class="tree-title">${escapeHtml(node.title)}</span>`;
@@ -67,12 +66,10 @@ function buildTree(runtime, container, opts={}){
         }
       } else {
         if (node.type === "folder"){
-          state.selectedFolderId = node.id;
-          state.selectedItemId = node.id;
+          actions.selectFolder(node.id);
         } else {
-          state.selectedItemId = node.id;
+          actions.locateItem(node.id);
         }
-        runtime.render();
       }
     });
 
@@ -126,11 +123,12 @@ function buildTree(runtime, container, opts={}){
         if (!state.draggingId) return;
         const place = row.dataset.dropPlace || "after";
         e.preventDefault();
+        e.stopPropagation();
         if (place === "inside"){
-          moveItemToFolder(state.draggingId, node.id);
+          actions.moveItemToFolder(state.draggingId, node.id, null, { render:false });
           state.expanded.add(node.id);
         } else {
-          moveItemRelativeToTarget(state.draggingId, node.id, place);
+          actions.moveItemRelativeToTarget(state.draggingId, node.id, place, { render:false });
         }
         state.draggingId = null;
         clearTreeDragMarkers();

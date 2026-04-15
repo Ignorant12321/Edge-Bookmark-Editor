@@ -6,16 +6,17 @@ import {
   getCurrentFolder,
   getVisibleItems,
   countCurrentItems,
+  findById,
   findParentOf,
   pathToNode,
-  moveItemToFolder,
-  reorderWithinFolder,
 } from "./tree-model.js";
 
 function renderBreadcrumbs(runtime, folder){
   const { dom, actions } = runtime;
   dom.breadcrumbs.innerHTML = "";
-  const path = pathToNode(folder.id);
+  const anchorId = state.breadcrumbFolderId || folder.id;
+  const anchorNode = findById(anchorId)?.node;
+  const path = pathToNode(anchorNode?.type === "folder" ? anchorId : folder.id);
   path.forEach((node, idx) => {
     const btn = document.createElement("button");
     btn.className = "crumb-btn";
@@ -51,6 +52,7 @@ function cardDragEvents(runtime, card, item, index, currentFolder){
   card.addEventListener("dragover", e => {
     if (!state.draggingId || state.draggingId === item.id) return;
     e.preventDefault();
+    e.stopPropagation();
     clearDragMarkers();
     const rect = card.getBoundingClientRect();
     const y = e.clientY - rect.top;
@@ -60,16 +62,18 @@ function cardDragEvents(runtime, card, item, index, currentFolder){
   });
   card.addEventListener("drop", e => {
     e.preventDefault();
+    e.stopPropagation();
     const draggingId = state.draggingId;
     if (!draggingId || draggingId === item.id) return;
     if (card.classList.contains("drag-over-folder") && item.type === "folder"){
-      moveItemToFolder(draggingId, item.id);
+      runtime.actions.moveItemToFolder(draggingId, item.id, null, { render:false });
     } else {
       const insertIndex = card.classList.contains("drag-over-before") ? index : index + 1;
       const draggingOwner = findParentOf(draggingId);
-      if (draggingOwner?.id === currentFolder.id) reorderWithinFolder(currentFolder.id, draggingId, insertIndex);
-      else moveItemToFolder(draggingId, currentFolder.id, insertIndex);
+      if (draggingOwner?.id === currentFolder.id) runtime.actions.reorderWithinFolder(currentFolder.id, draggingId, insertIndex, { render:false });
+      else runtime.actions.moveItemToFolder(draggingId, currentFolder.id, insertIndex, { render:false });
     }
+    state.draggingId = null;
     clearDragMarkers();
     runtime.render();
   });
@@ -109,7 +113,7 @@ export function renderList(runtime){
     const isFolder = item.type === "folder";
     const bookmarkIconHtml = item.icon
       ? `<img class="card-favicon" src="${escapeHtml(item.icon)}" alt="" />`
-      : "🔗";
+      : "🌐";
     const parent = findParentOf(item.id);
     const pathInfo = parent && parent.id !== folder.id ? t("list.pathPrefix") + pathToNode(item.id).map(x => x.title).join(" / ") : "";
     const itemTypeLabel = isFolder ? t("list.itemTypes.folder") : t("list.itemTypes.bookmark");

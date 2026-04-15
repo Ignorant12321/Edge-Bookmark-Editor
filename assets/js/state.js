@@ -4,6 +4,7 @@ export const state = {
   root: null,
   originalRoot: null,
   selectedFolderId: null,
+  breadcrumbFolderId: null,
   selectedItemId: null,
   search: "",
   searchScope: "all",
@@ -12,6 +13,10 @@ export const state = {
   expanded: new Set(),
   moveTargetFolderId: null,
   draggingId: null,
+  iconFetchMode: "auto",
+  iconUploadSize: 32,
+  historyPast: [],
+  historyFuture: [],
 };
 
 export function uid(){ return "n" + (state.nextId++); }

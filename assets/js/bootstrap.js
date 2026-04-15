@@ -19,6 +19,15 @@ function formatExportTimestamp(date=new Date()){
 
 function collectDom(){
   return {
+    filterMenuBtn: document.getElementById("filterMenuBtn"),
+    filterMenuWrap: document.getElementById("filterMenuWrap"),
+    iconFetchModeBtn: document.getElementById("iconFetchModeBtn"),
+    iconFetchMenuWrap: document.getElementById("iconFetchMenuWrap"),
+    iconFetchModeItems: document.querySelectorAll("[data-icon-mode]"),
+    btnFetchIconNow: document.getElementById("btnFetchIconNow"),
+    iconUploadSizeBtn: document.getElementById("iconUploadSizeBtn"),
+    iconUploadSizeWrap: document.getElementById("iconUploadSizeWrap"),
+    iconUploadSizeItems: document.querySelectorAll("[data-icon-upload-size]"),
     importMenuBtn: document.getElementById("importMenuBtn"),
     importMenuWrap: document.getElementById("importMenuWrap"),
     exportMenuBtn: document.getElementById("exportMenuBtn"),
@@ -38,6 +47,8 @@ function collectDom(){
     btnClearSearch: document.getElementById("btnClearSearch"),
     searchScope: document.getElementById("searchScope"),
     typeFilter: document.getElementById("typeFilter"),
+    btnUndo: document.getElementById("btnUndo"),
+    btnRedo: document.getElementById("btnRedo"),
     btnResetFilters: document.getElementById("btnResetFilters"),
     btnFetchMissingIcons: document.getElementById("btnFetchMissingIcons"),
     langToggleBtn: document.getElementById("langToggleBtn"),
@@ -46,7 +57,12 @@ function collectDom(){
     btnAddFolderCenter: document.getElementById("btnAddFolderCenter"),
     btnAddBookmark: document.getElementById("btnAddBookmark"),
     btnDelete: document.getElementById("btnDelete"),
+    btnCopyAction: document.getElementById("btnCopyAction"),
+    btnDissolve: document.getElementById("btnDissolve"),
+    btnMoveUp: document.getElementById("btnMoveUp"),
+    btnMoveDown: document.getElementById("btnMoveDown"),
     btnMove: document.getElementById("btnMove"),
+    btnLocateTree: document.getElementById("btnLocateTree"),
 
     moveModalMask: document.getElementById("moveModalMask"),
     btnCloseMoveModal: document.getElementById("btnCloseMoveModal"),
@@ -58,6 +74,7 @@ function collectDom(){
 
     tree: document.getElementById("tree"),
     moveTree: document.getElementById("moveTree"),
+    contentPanelBody: document.getElementById("contentPanelBody"),
     list: document.getElementById("list"),
     listTitle: document.getElementById("listTitle"),
     listStats: document.getElementById("listStats"),
@@ -72,19 +89,56 @@ function collectDom(){
     editTitle: document.getElementById("editTitle"),
     editHref: document.getElementById("editHref"),
     editIcon: document.getElementById("editIcon"),
-    btnFetchIcon: document.getElementById("btnFetchIcon"),
+    iconPreviewFallback: document.getElementById("iconPreviewFallback"),
     btnPickIconFile: document.getElementById("btnPickIconFile"),
     iconPreview: document.getElementById("iconPreview"),
     toast: document.getElementById("toast"),
   };
 }
 
-function setupMenu(btn, wrap){
+function setupMenu(btn, wrap, options={}){
+  if (!btn || !wrap) return;
+  const { persistent=false } = options;
   btn.onclick = e => {
     e.stopPropagation();
     document.querySelectorAll(".menu-wrap").forEach(x => x !== wrap && x.classList.remove("open"));
     wrap.classList.toggle("open");
   };
+  if (persistent){
+    wrap.addEventListener("click", e => e.stopPropagation());
+    wrap.addEventListener("change", e => e.stopPropagation());
+  }
+}
+
+function syncIconFetchModeMenu(runtime){
+  const mode = normalizeIconFetchMode(state.iconFetchMode);
+  state.iconFetchMode = mode;
+  runtime.dom.iconFetchModeItems?.forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.iconMode === mode);
+  });
+}
+
+function normalizeIconFetchMode(rawMode){
+  const mode = String(rawMode || "auto").toLowerCase();
+  if (mode === "google") return "googles2";
+  if (mode === "duckduckgo" || mode === "favicon" || mode === "googles2" || mode === "auto") return mode;
+  return "auto";
+}
+
+function normalizeIconUploadSize(rawSize){
+  const value = Number(rawSize);
+  if (!Number.isFinite(value)) return 32;
+  const size = Math.round(value);
+  const supported = [16, 24, 32, 48, 64];
+  return supported.includes(size) ? size : 32;
+}
+
+function syncIconUploadSizeMenu(runtime){
+  const size = normalizeIconUploadSize(state.iconUploadSize);
+  state.iconUploadSize = size;
+  runtime.dom.iconUploadSizeItems?.forEach(btn => {
+    btn.classList.toggle("active", normalizeIconUploadSize(btn.dataset.iconUploadSize) === size);
+  });
 }
 
 function setupSplitter(splitter, side){
@@ -114,6 +168,25 @@ function setupSplitter(splitter, side){
   });
 }
 
+function setupContentDropTarget(runtime){
+  const { dom, actions } = runtime;
+  const panel = dom.contentPanelBody;
+  if (!panel) return;
+
+  panel.addEventListener("dragover", e => {
+    if (!state.draggingId) return;
+    e.preventDefault();
+  });
+
+  panel.addEventListener("drop", e => {
+    if (!state.draggingId || !state.selectedFolderId) return;
+    e.preventDefault();
+    actions.moveItemToFolder(state.draggingId, state.selectedFolderId, null, { render:false });
+    state.draggingId = null;
+    runtime.render();
+  });
+}
+
 export function bootstrapApp(){
   const dom = collectDom();
   const runtime = { state, dom };
@@ -131,11 +204,18 @@ export function bootstrapApp(){
     runtime.renderTree();
     runtime.renderList();
     runtime.renderEditor();
+    syncIconFetchModeMenu(runtime);
+    syncIconUploadSizeMenu(runtime);
     dom.btnClearSearch.classList.toggle("show", !!state.search);
+    if (dom.btnUndo) dom.btnUndo.disabled = state.historyPast.length === 0;
+    if (dom.btnRedo) dom.btnRedo.disabled = state.historyFuture.length === 0;
   };
 
   setupMenu(dom.importMenuBtn, dom.importMenuWrap);
   setupMenu(dom.exportMenuBtn, dom.exportMenuWrap);
+  setupMenu(dom.filterMenuBtn, dom.filterMenuWrap, { persistent:true });
+  setupMenu(dom.iconFetchModeBtn, dom.iconFetchMenuWrap);
+  setupMenu(dom.iconUploadSizeBtn, dom.iconUploadSizeWrap);
   document.addEventListener("click", () => document.querySelectorAll(".menu-wrap").forEach(x => x.classList.remove("open")));
 
   dom.actionImportHtml.onclick = () => dom.fileHtml.click();
@@ -155,7 +235,42 @@ export function bootstrapApp(){
   dom.btnAddFolderCenter.onclick = actions.addFolder;
   dom.btnAddBookmark.onclick = actions.addBookmark;
   dom.btnDelete.onclick = actions.deleteSelected;
+  dom.btnCopyAction.onclick = actions.copySelected;
+  dom.btnDissolve.onclick = actions.dissolveSelected;
+  dom.btnMoveUp.onclick = actions.moveSelectedUp;
+  dom.btnMoveDown.onclick = actions.moveSelectedDown;
   dom.btnMove.onclick = actions.openMoveModal;
+  dom.btnUndo.onclick = actions.undo;
+  dom.btnRedo.onclick = actions.redo;
+  dom.btnLocateTree.onclick = actions.locateSelectionInTree;
+  dom.btnLocateTree.addEventListener("keydown", e => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    actions.locateSelectionInTree();
+  });
+  dom.btnFetchIconNow.addEventListener("click", async () => {
+    const mode = normalizeIconFetchMode(state.iconFetchMode);
+    state.iconFetchMode = mode;
+    await actions.fetchIconForSelectedBookmark(mode);
+    syncIconFetchModeMenu(runtime);
+  });
+  dom.iconFetchModeItems?.forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      const mode = normalizeIconFetchMode(btn.dataset.iconMode || "auto");
+      state.iconFetchMode = mode;
+      dom.iconFetchMenuWrap.classList.remove("open");
+      syncIconFetchModeMenu(runtime);
+    });
+  });
+  dom.iconUploadSizeItems?.forEach(btn => {
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      state.iconUploadSize = normalizeIconUploadSize(btn.dataset.iconUploadSize);
+      dom.iconUploadSizeWrap.classList.remove("open");
+      syncIconUploadSizeMenu(runtime);
+    });
+  });
   dom.btnCloseMoveModal.onclick = actions.closeMoveModal;
   dom.btnCancelMove.onclick = actions.closeMoveModal;
   dom.btnConfirmMove.onclick = actions.confirmMove;
@@ -214,14 +329,11 @@ export function bootstrapApp(){
     actions.importJsonText(await file.text());
     e.target.value = "";
   });
-  dom.btnFetchIcon.addEventListener("click", async () => {
-    await actions.fetchIconForSelectedBookmark();
-  });
   dom.btnPickIconFile.addEventListener("click", () => dom.fileIcon.click());
   dom.fileIcon.addEventListener("change", async e => {
     const file = e.target.files[0];
     if (!file) return;
-    await actions.loadIconFileToEditor(file);
+    await actions.loadIconFileToEditor(file, normalizeIconUploadSize(state.iconUploadSize));
     actions.autosaveEditor();
     e.target.value = "";
   });
@@ -237,6 +349,7 @@ export function bootstrapApp(){
 
   setupSplitter(dom.splitterLeft, "left");
   setupSplitter(dom.splitterRight, "right");
+  setupContentDropTarget(runtime);
 
   actions.initTheme();
   initI18n(runtime);

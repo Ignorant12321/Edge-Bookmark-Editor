@@ -1,4 +1,4 @@
-import { state, cloneDeep, reseedIds, createFolder, createBookmark } from "./state.js";
+import { state, cloneDeep, reseedIds, createFolder, createBookmark, uid } from "./state.js";
 import { PRELOADED_BOOKMARK_HTML_BASE64 } from "./constants.js";
 import { decodeBase64Utf8 } from "./utils.js";
 import { parseBookmarkHtml, importJson } from "./bookmark-format.js";
@@ -10,6 +10,9 @@ import {
   getCurrentFolder,
   expandPath,
   moveItemToFolder,
+  moveItemRelativeToTarget,
+  reorderWithinFolder,
+  pathToNode,
   touchLastModified,
 } from "./tree-model.js";
 
@@ -25,8 +28,11 @@ import {
  * 3) local file input is converted to data URL before save
  */
 const ICON_FETCH_CONCURRENCY = 4;
+const HISTORY_LIMIT = 120;
 let iconBatchRunning = false;
 let toastTimer = null;
+let editorHistoryTimer = null;
+let pendingEditorSnapshot = null;
 
 function showToast(runtime, text="", options={}){
   const { sticky=false, duration=2400 } = options;
@@ -48,7 +54,7 @@ function showToast(runtime, text="", options={}){
   }
 }
 
-function buildIconCandidates(href){
+function buildIconCandidates(href, mode="auto"){
   try {
     const url = new URL(String(href || "").trim());
     if (!/^https?:$/i.test(url.protocol)) return [];
@@ -58,16 +64,25 @@ function buildIconCandidates(href){
     const primaryOrigin = `${protocol}//${hostname}`;
     const fallbackOrigin = `${oppositeProtocol}//${hostname}`;
     const encodedHref = encodeURIComponent(url.href);
-    const candidates = [
-      `https://icons.duckduckgo.com/ip3/${hostname}.ico`,
-      `${primaryOrigin}/favicon.ico`,
-      `${primaryOrigin}/apple-touch-icon.png`,
-      `${primaryOrigin}/apple-touch-icon-precomposed.png`,
-      `${fallbackOrigin}/favicon.ico`,
-      // Keep Google only as final fallback: improves long-tail site hit rate
-      // when reachable, and harmlessly fails when blocked.
-      `https://www.google.com/s2/favicons?domain_url=${encodedHref}&sz=64`,
-    ];
+    const normalizedMode = String(mode || "auto").toLowerCase() === "google" ? "googles2" : String(mode || "auto").toLowerCase();
+    const candidatesByMode = {
+      auto: [
+        `https://icons.duckduckgo.com/ip3/${hostname}.ico`,
+        `${primaryOrigin}/favicon.ico`,
+        `${primaryOrigin}/apple-touch-icon.png`,
+        `${primaryOrigin}/apple-touch-icon-precomposed.png`,
+        `${fallbackOrigin}/favicon.ico`,
+        // Keep Google only as final fallback: improves long-tail site hit rate
+        // when reachable, and harmlessly fails when blocked.
+        `https://www.google.com/s2/favicons?domain_url=${encodedHref}&sz=64`,
+      ],
+      duckduckgo: [`https://icons.duckduckgo.com/ip3/${hostname}.ico`],
+      favicon: [`${primaryOrigin}/favicon.ico`, `${fallbackOrigin}/favicon.ico`],
+      apple: [`${primaryOrigin}/apple-touch-icon.png`, `${primaryOrigin}/apple-touch-icon-precomposed.png`],
+      googles2: [`https://www.google.com/s2/favicons?domain_url=${encodedHref}&sz=64`],
+      google: [`https://www.google.com/s2/favicons?domain_url=${encodedHref}&sz=64`],
+    };
+    const candidates = candidatesByMode[normalizedMode] || candidatesByMode.auto;
     return Array.from(new Set(candidates));
   } catch {
     return [];
@@ -102,16 +117,21 @@ function canLoadImage(url, timeoutMs=4500){
 function updateIconPreviewElement(dom, iconValue){
   if (!dom.iconPreview) return;
   const src = String(iconValue || "").trim();
+  const fallback = dom.iconPreviewFallback;
   if (!src){
     dom.iconPreview.classList.add("hidden");
     dom.iconPreview.removeAttribute("src");
+    fallback?.classList.remove("hidden");
     return;
   }
+  fallback?.classList.remove("hidden");
   dom.iconPreview.onload = () => {
     dom.iconPreview.classList.remove("hidden");
+    fallback?.classList.add("hidden");
   };
   dom.iconPreview.onerror = () => {
     dom.iconPreview.classList.add("hidden");
+    fallback?.classList.remove("hidden");
   };
   dom.iconPreview.src = src;
 }
@@ -125,9 +145,30 @@ async function readFileAsDataUrl(file){
   });
 }
 
-async function fetchIconForBookmarkNode(runtime, bookmark){
+async function resizeDataUrlToSquare(dataUrl, size=32){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      if (!ctx){
+        resolve(dataUrl);
+        return;
+      }
+      ctx.clearRect(0, 0, size, size);
+      ctx.drawImage(img, 0, 0, size, size);
+      resolve(canvas.toDataURL("image/png"));
+    };
+    img.onerror = () => reject(new Error("resize-failed"));
+    img.src = dataUrl;
+  });
+}
+
+async function fetchIconForBookmarkNode(runtime, bookmark, mode="auto"){
   if (!bookmark || bookmark.type !== "bookmark") return { ok:false, reason:"not-bookmark" };
-  const candidates = buildIconCandidates(bookmark.href);
+  const candidates = buildIconCandidates(bookmark.href, mode);
   if (!candidates.length) return { ok:false, reason:"invalid-url" };
   for (const candidate of candidates){
     // Image probing avoids CORS fetch limitations and keeps this client-only.
@@ -158,10 +199,17 @@ export function updateIconPreview(runtime, rawValue){
   updateIconPreviewElement(runtime.dom, normalized);
 }
 
-export async function loadIconFileToEditor(runtime, file){
+export async function loadIconFileToEditor(runtime, file, sizeOverride){
   if (!file) return;
+  const size = Number.isFinite(Number(sizeOverride)) ? Math.max(16, Number(sizeOverride)) : Number(state.iconUploadSize || 32);
   try {
-    const dataUrl = await readFileAsDataUrl(file);
+    const rawDataUrl = await readFileAsDataUrl(file);
+    let dataUrl = rawDataUrl;
+    try {
+      dataUrl = await resizeDataUrlToSquare(rawDataUrl, size);
+    } catch {
+      dataUrl = rawDataUrl;
+    }
     runtime.dom.editIcon.value = dataUrl;
     updateIconPreview(runtime, dataUrl);
   } catch (err){
@@ -169,15 +217,133 @@ export async function loadIconFileToEditor(runtime, file){
   }
 }
 
-export async function fetchIconForSelectedBookmark(runtime){
+function focusEditorTitleInput(runtime){
+  const input = runtime?.dom?.editTitle;
+  if (!input) return;
+  requestAnimationFrame(() => {
+    input.focus();
+    input.select();
+  });
+}
+
+function snapshotState(){
+  if (!state.root) return null;
+  return {
+    root: cloneDeep(state.root),
+    selectedFolderId: state.selectedFolderId,
+    breadcrumbFolderId: state.breadcrumbFolderId,
+    selectedItemId: state.selectedItemId,
+    expanded: Array.from(state.expanded),
+  };
+}
+
+function syncNextIdFromRoot(){
+  if (!state.root) return;
+  let maxId = 0;
+  walk(state.root).forEach(({ node }) => {
+    const match = /^n(\d+)$/.exec(String(node.id || ""));
+    if (match) maxId = Math.max(maxId, Number(match[1]));
+  });
+  state.nextId = Math.max(state.nextId, maxId + 1);
+}
+
+function restoreSnapshot(snapshot){
+  if (!snapshot?.root) return;
+  state.root = cloneDeep(snapshot.root);
+  state.expanded = new Set(snapshot.expanded || []);
+  state.selectedFolderId = snapshot.selectedFolderId;
+  state.breadcrumbFolderId = snapshot.breadcrumbFolderId;
+  state.selectedItemId = snapshot.selectedItemId;
+
+  const selectedFolder = findById(state.selectedFolderId)?.node;
+  if (!selectedFolder || selectedFolder.type !== "folder"){
+    state.selectedFolderId = state.root.id;
+  }
+  const breadcrumbFolder = findById(state.breadcrumbFolderId)?.node;
+  if (!breadcrumbFolder || breadcrumbFolder.type !== "folder"){
+    state.breadcrumbFolderId = state.selectedFolderId;
+  }
+  if (!findById(state.selectedItemId)){
+    state.selectedItemId = state.selectedFolderId;
+  }
+  syncNextIdFromRoot();
+}
+
+function pushHistorySnapshot(snapshot){
+  if (!snapshot?.root) return;
+  state.historyPast.push(snapshot);
+  if (state.historyPast.length > HISTORY_LIMIT) state.historyPast.shift();
+  state.historyFuture = [];
+}
+
+function queueEditorHistorySnapshot(snapshot){
+  if (!snapshot?.root) return;
+  if (!pendingEditorSnapshot) pendingEditorSnapshot = snapshot;
+  if (editorHistoryTimer) return;
+  editorHistoryTimer = setTimeout(() => {
+    if (pendingEditorSnapshot) pushHistorySnapshot(pendingEditorSnapshot);
+    pendingEditorSnapshot = null;
+    editorHistoryTimer = null;
+  }, 420);
+}
+
+function flushEditorHistorySnapshot(){
+  if (editorHistoryTimer){
+    clearTimeout(editorHistoryTimer);
+    editorHistoryTimer = null;
+  }
+  if (pendingEditorSnapshot){
+    pushHistorySnapshot(pendingEditorSnapshot);
+    pendingEditorSnapshot = null;
+  }
+}
+
+function recordMutationBeforeChange(){
+  flushEditorHistorySnapshot();
+  pushHistorySnapshot(snapshotState());
+}
+
+function clearHistoryStacks(){
+  pendingEditorSnapshot = null;
+  if (editorHistoryTimer){
+    clearTimeout(editorHistoryTimer);
+    editorHistoryTimer = null;
+  }
+  state.historyPast = [];
+  state.historyFuture = [];
+}
+
+function setCurrentFolderState(folderId, options={}){
+  const { selectedItemId=folderId, updateBreadcrumb=true } = options;
+  const folder = findById(folderId)?.node;
+  if (!folder || folder.type !== "folder") return false;
+  state.selectedFolderId = folderId;
+  state.selectedItemId = selectedItemId;
+  expandPath(folderId);
+  if (updateBreadcrumb) state.breadcrumbFolderId = folderId;
+  return true;
+}
+
+function keepCurrentFolderWhenMovingAcrossParents(itemId, nextOwnerId){
+  if (!itemId || state.selectedFolderId !== itemId) return;
+  const owner = findParentOf(itemId);
+  if (!owner || owner.id === nextOwnerId) return;
+  state.selectedFolderId = owner.id;
+  if (state.breadcrumbFolderId === itemId) state.breadcrumbFolderId = owner.id;
+}
+
+export async function fetchIconForSelectedBookmark(runtime, modeOverride){
   const info = findById(state.selectedItemId);
   if (!info || info.node.type !== "bookmark"){
     alert(t("alerts.selectBookmarkFirst"));
     return;
   }
+  const snapshot = snapshotState();
   showToast(runtime, t("toasts.fetchCurrentStart"), { sticky:true });
-  const result = await fetchIconForBookmarkNode(runtime, info.node);
+  const mode = String(modeOverride || state.iconFetchMode || "auto");
+  const result = await fetchIconForBookmarkNode(runtime, info.node, mode);
   if (result.ok){
+    pushHistorySnapshot(snapshot);
     runtime.dom.editIcon.value = info.node.icon || "";
     updateIconPreview(runtime, info.node.icon || "");
     showToast(runtime, t("toasts.fetchCurrentSuccess"));
@@ -202,6 +368,7 @@ export async function fetchIconsForAllMissing(runtime){
   }
 
   iconBatchRunning = true;
+  const snapshot = snapshotState();
   let done = 0;
   let success = 0;
   let failed = 0;
@@ -223,16 +390,27 @@ export async function fetchIconsForAllMissing(runtime){
   const workers = Array.from({ length: Math.min(ICON_FETCH_CONCURRENCY, targets.length) }, () => worker());
   await Promise.all(workers);
   iconBatchRunning = false;
+  if (success > 0) pushHistorySnapshot(snapshot);
 
   showToast(runtime, t("toasts.batchDone", { success, failed }));
   runtime.render();
 }
 
-export function selectFolder(runtime, id){
-  state.selectedFolderId = id;
-  state.selectedItemId = id;
-  expandPath(id);
+export function selectFolder(runtime, id, options={}){
+  if (!setCurrentFolderState(id, options)) return;
   runtime.render();
+}
+
+export function locateItem(runtime, id, options={}){
+  const info = findById(id);
+  if (!info) return;
+  if (info.node.type === "folder"){
+    if (setCurrentFolderState(id, options)) runtime.render();
+    return;
+  }
+  const owner = findParentOf(id);
+  if (!owner) return;
+  if (setCurrentFolderState(owner.id, { ...options, selectedItemId: id })) runtime.render();
 }
 
 export function selectItem(runtime, id){
@@ -246,8 +424,10 @@ export function selectItem(runtime, id){
 }
 
 export function saveEditor(runtime){
+  const snapshot = snapshotState();
   const changed = applyEditorValues(runtime);
   if (!changed) return;
+  pushHistorySnapshot(snapshot);
   const info = findById(state.selectedItemId);
   if (info?.node?.type === "bookmark") updateIconPreview(runtime, info.node.icon || "");
   runtime.render();
@@ -284,10 +464,56 @@ function applyEditorValues(runtime){
 }
 
 export function autosaveEditor(runtime){
+  const snapshot = snapshotState();
   const changed = applyEditorValues(runtime);
   if (!changed) return;
+  queueEditorHistorySnapshot(snapshot);
   runtime.renderTree();
   runtime.renderList();
+}
+
+export function moveItemToFolderWithState(runtime, itemId, targetFolderId, targetIndex=null, options={}){
+  const { render=true } = options;
+  const owner = findParentOf(itemId);
+  if (!owner) return false;
+  recordMutationBeforeChange();
+  keepCurrentFolderWhenMovingAcrossParents(itemId, targetFolderId);
+  moveItemToFolder(itemId, targetFolderId, targetIndex);
+  if (render) runtime.render();
+  return true;
+}
+
+export function moveItemRelativeWithState(runtime, itemId, targetId, place, options={}){
+  const { render=true } = options;
+  const owner = findParentOf(itemId);
+  const targetOwner = findParentOf(targetId);
+  if (!owner || !targetOwner) return false;
+  recordMutationBeforeChange();
+  keepCurrentFolderWhenMovingAcrossParents(itemId, targetOwner.id);
+  moveItemRelativeToTarget(itemId, targetId, place);
+  if (render) runtime.render();
+  return true;
+}
+
+export function reorderItemWithState(runtime, folderId, itemId, targetIndex, options={}){
+  const { render=true } = options;
+  recordMutationBeforeChange();
+  reorderWithinFolder(folderId, itemId, targetIndex);
+  if (render) runtime.render();
+}
+
+export function moveSelectedByOffset(runtime, offset){
+  const itemId = state.selectedItemId;
+  const owner = findParentOf(itemId);
+  if (!owner) return;
+  const index = owner.children.findIndex(x => x.id === itemId);
+  if (index === -1) return;
+  const nextIndex = Math.max(0, Math.min(owner.children.length - 1, index + offset));
+  if (nextIndex === index) return;
+  // reorderWithinFolder expects insertion index based on the original array,
+  // so moving downward needs +1 to land at the expected final position.
+  const insertionIndex = nextIndex > index ? nextIndex + 1 : nextIndex;
+  reorderItemWithState(runtime, owner.id, itemId, insertionIndex);
 }
 
 export function deleteSelected(runtime){
@@ -296,31 +522,116 @@ export function deleteSelected(runtime){
   const item = findById(itemId)?.node;
   if (!owner || !item) return alert(t("alerts.cannotDeleteRoot"));
   if (!confirm(t("alerts.confirmDelete", { title: item.title }))) return;
+  recordMutationBeforeChange();
   owner.children = owner.children.filter(c => c.id !== itemId);
   touchLastModified(owner);
-  state.selectedItemId = owner.id;
-  state.selectedFolderId = owner.id;
+  if (state.selectedFolderId === itemId){
+    state.selectedFolderId = owner.id;
+    if (state.breadcrumbFolderId === itemId) state.breadcrumbFolderId = owner.id;
+  }
+  if (!findById(state.selectedFolderId)) state.selectedFolderId = owner.id;
+  state.selectedItemId = findById(state.selectedFolderId)?.node ? state.selectedFolderId : owner.id;
   runtime.render();
+}
+
+export function dissolveSelected(runtime){
+  const info = findById(state.selectedItemId);
+  if (!info || info.node.type !== "folder"){
+    alert(t("alerts.selectFolderFirst"));
+    return;
+  }
+  const folder = info.node;
+  if (folder.id === state.root?.id){
+    alert(t("alerts.cannotDissolveRoot"));
+    return;
+  }
+  const targetFolder = getCurrentFolder();
+  if (!targetFolder || targetFolder.type !== "folder") return;
+  if (targetFolder.id === folder.id){
+    alert(t("alerts.cannotDissolveCurrentFolder"));
+    return;
+  }
+  const owner = findParentOf(folder.id);
+  if (!owner) return;
+  const targetPath = pathToNode(targetFolder.id).map(x => x.id);
+  if (targetPath.includes(folder.id)){
+    alert(t("alerts.cannotDissolveIntoDescendant"));
+    return;
+  }
+  if (!confirm(t("alerts.confirmDissolve", { title: folder.title, target: targetFolder.title }))) return;
+  recordMutationBeforeChange();
+
+  const index = owner.children.findIndex(x => x.id === folder.id);
+  if (index === -1) return;
+  const children = folder.children || [];
+  if (owner.id === targetFolder.id){
+    owner.children.splice(index, 1, ...children);
+    touchLastModified(owner);
+  } else {
+    owner.children.splice(index, 1);
+    targetFolder.children.push(...children);
+    touchLastModified(owner);
+    touchLastModified(targetFolder);
+  }
+
+  if (state.selectedFolderId === folder.id){
+    state.selectedFolderId = owner.id;
+    if (state.breadcrumbFolderId === folder.id) state.breadcrumbFolderId = owner.id;
+  }
+  state.selectedItemId = targetFolder.id;
+  runtime.render();
+}
+
+function cloneNodeWithNewIds(node){
+  const cloned = cloneDeep(node);
+  function renew(current){
+    current.id = uid();
+    if (current.type === "folder"){
+      current.children = (current.children || []).map(child => renew(child));
+    }
+    return current;
+  }
+  return renew(cloned);
+}
+
+export function copySelected(runtime){
+  const info = findById(state.selectedItemId);
+  if (!info) return;
+  const owner = findParentOf(info.node.id);
+  if (!owner) return alert(t("alerts.cannotCopyRoot"));
+  recordMutationBeforeChange();
+  const cloned = cloneNodeWithNewIds(info.node);
+  const idx = owner.children.findIndex(x => x.id === info.node.id);
+  owner.children.splice(idx + 1, 0, cloned);
+  touchLastModified(owner);
+  if (cloned.type === "folder") state.expanded.add(cloned.id);
+  state.selectedItemId = cloned.id;
+  runtime.render();
+  focusEditorTitleInput(runtime);
 }
 
 export function addFolder(runtime){
   const folder = getCurrentFolder();
+  recordMutationBeforeChange();
   const node = createFolder();
   folder.children.unshift(node);
   touchLastModified(folder);
   state.expanded.add(folder.id);
   state.selectedItemId = node.id;
   runtime.render();
+  focusEditorTitleInput(runtime);
 }
 
 export function addBookmark(runtime){
   const folder = getCurrentFolder();
+  recordMutationBeforeChange();
   const node = createBookmark();
   folder.children.unshift(node);
   touchLastModified(folder);
   state.expanded.add(folder.id);
   state.selectedItemId = node.id;
   runtime.render();
+  focusEditorTitleInput(runtime);
 }
 
 export function openMoveModal(runtime){
@@ -341,8 +652,52 @@ export function confirmMove(runtime){
   const itemId = state.selectedItemId;
   const targetFolderId = state.moveTargetFolderId;
   if (!itemId || !targetFolderId) return;
-  moveItemToFolder(itemId, targetFolderId);
+  moveItemToFolderWithState(runtime, itemId, targetFolderId, null, { render:false });
   closeMoveModal(runtime);
+  runtime.render();
+}
+
+export function locateSelectionInTree(runtime){
+  const info = findById(state.selectedItemId);
+  if (!info) return;
+  if (info.node.type === "folder") expandPath(info.node.id);
+  else {
+    const owner = findParentOf(info.node.id);
+    if (owner) expandPath(owner.id);
+  }
+  runtime.renderTree();
+  const treeEl = runtime.dom.tree;
+  const row = treeEl?.querySelector(`.tree-row[data-node-id="${info.node.id}"]`);
+  if (row){
+    row.scrollIntoView({ block:"center", behavior:"smooth" });
+    row.classList.add("locate-flash");
+    setTimeout(() => row.classList.remove("locate-flash"), 640);
+  }
+}
+
+export function undo(runtime){
+  flushEditorHistorySnapshot();
+  const snapshot = state.historyPast.pop();
+  if (!snapshot) return;
+  const current = snapshotState();
+  if (current?.root){
+    state.historyFuture.push(current);
+    if (state.historyFuture.length > HISTORY_LIMIT) state.historyFuture.shift();
+  }
+  restoreSnapshot(snapshot);
+  runtime.render();
+}
+
+export function redo(runtime){
+  flushEditorHistorySnapshot();
+  const snapshot = state.historyFuture.pop();
+  if (!snapshot) return;
+  const current = snapshotState();
+  if (current?.root){
+    state.historyPast.push(current);
+    if (state.historyPast.length > HISTORY_LIMIT) state.historyPast.shift();
+  }
+  restoreSnapshot(snapshot);
   runtime.render();
 }
 
@@ -350,8 +705,11 @@ export function setRoot(runtime, root, options={}){
   state.root = root;
   if (options.rememberOriginal !== false) state.originalRoot = cloneDeep(root);
   state.selectedFolderId = root.id;
+  state.breadcrumbFolderId = root.id;
   state.selectedItemId = root.id;
   state.expanded = new Set([root.id]);
+  clearHistoryStacks();
+  syncNextIdFromRoot();
   showToast(runtime, "");
   runtime.render();
 }
@@ -394,15 +752,26 @@ export function createActions(runtime){
     saveEditor: () => saveEditor(runtime),
     autosaveEditor: () => autosaveEditor(runtime),
     deleteSelected: () => deleteSelected(runtime),
+    dissolveSelected: () => dissolveSelected(runtime),
+    copySelected: () => copySelected(runtime),
+    moveSelectedUp: () => moveSelectedByOffset(runtime, -1),
+    moveSelectedDown: () => moveSelectedByOffset(runtime, 1),
     addFolder: () => addFolder(runtime),
     addBookmark: () => addBookmark(runtime),
     openMoveModal: () => openMoveModal(runtime),
     closeMoveModal: () => closeMoveModal(runtime),
     confirmMove: () => confirmMove(runtime),
+    moveItemToFolder: (itemId, folderId, targetIndex, options) => moveItemToFolderWithState(runtime, itemId, folderId, targetIndex, options),
+    moveItemRelativeToTarget: (itemId, targetId, place, options) => moveItemRelativeWithState(runtime, itemId, targetId, place, options),
+    reorderWithinFolder: (folderId, itemId, targetIndex, options) => reorderItemWithState(runtime, folderId, itemId, targetIndex, options),
     restoreOriginalData: () => restoreOriginalData(runtime),
+    undo: () => undo(runtime),
+    redo: () => redo(runtime),
+    locateSelectionInTree: () => locateSelectionInTree(runtime),
     applyTheme: theme => applyTheme(runtime, theme),
     initTheme: () => initTheme(runtime),
-    selectFolder: id => selectFolder(runtime, id),
+    selectFolder: (id, options) => selectFolder(runtime, id, options),
+    locateItem: (id, options) => locateItem(runtime, id, options),
     selectItem: id => selectItem(runtime, id),
     setRoot: (root, options) => setRoot(runtime, root, options),
     loadPreloaded: () => loadPreloaded(runtime),
@@ -410,8 +779,8 @@ export function createActions(runtime){
     importJsonText: text => importJsonText(runtime, text),
     normalizeIconInput: raw => normalizeIconInput(runtime, raw),
     updateIconPreview: raw => updateIconPreview(runtime, raw),
-    loadIconFileToEditor: file => loadIconFileToEditor(runtime, file),
-    fetchIconForSelectedBookmark: () => fetchIconForSelectedBookmark(runtime),
+    loadIconFileToEditor: (file, size) => loadIconFileToEditor(runtime, file, size),
+    fetchIconForSelectedBookmark: mode => fetchIconForSelectedBookmark(runtime, mode),
     fetchIconsForAllMissing: () => fetchIconsForAllMissing(runtime),
   };
 }
